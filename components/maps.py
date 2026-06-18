@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def create_disaster_map(
     sites_df: pd.DataFrame | None = None,
     warehouses_df: pd.DataFrame | None = None,
