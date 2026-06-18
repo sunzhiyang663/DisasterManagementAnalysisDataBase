@@ -29,11 +29,24 @@ def _get_db_params() -> dict | None:
     return None
 
 
-_store = threading.local()  # 每个线程持有自己的连接
+_sessions: dict = {}
+_sessions_lock = threading.Lock()
+
+
+def _get_session_id() -> str:
+    """获取当前 Streamlit 会话 ID，用于跨页面保持同一连接"""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        if ctx and ctx.session_id:
+            return ctx.session_id
+    except Exception:
+        pass
+    return f"thread_{threading.get_ident()}"
 
 
 def _raw_connect() -> pymssql.Connection | None:
-    """底层连接创建，每次调用建立新连接"""
+    """底层连接创建"""
     params = _get_db_params()
     if not params:
         return None
@@ -44,11 +57,24 @@ _last_error: str = ""
 
 
 def get_connection() -> pymssql.Connection | None:
-    """获取当前线程的数据库连接，同一线程内复用"""
-    if hasattr(_store, 'conn') and _store.conn is not None:
-        return _store.conn
-    _store.conn = _raw_connect()
-    return _store.conn
+    """按 Streamlit 会话保持数据库连接，同一用户跨页面复用"""
+    sid = _get_session_id()
+    with _sessions_lock:
+        if sid in _sessions:
+            conn = _sessions[sid]
+            try:
+                conn.cursor().execute("SELECT 1")
+                return conn
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                del _sessions[sid]
+        conn = _raw_connect()
+        if conn:
+            _sessions[sid] = conn
+        return conn
 
 
 def get_connection_with_error() -> tuple[pymssql.Connection | None, str]:
