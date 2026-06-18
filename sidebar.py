@@ -42,13 +42,17 @@ def render():
 
         st.divider()
 
-        from db import get_connection_with_error
+        # 只在首次检查数据库连接，结果缓存到 session_state
+        if "db_ok" not in st.session_state:
+            from db import get_connection_with_error
+            conn, err = get_connection_with_error()
+            st.session_state.db_ok = conn is not None
+            st.session_state.db_err = err
 
-        conn, err = get_connection_with_error()
-        if conn is None:
-            st.error(f"⚠ 未连接")
-            if err:
-                with st.expander("查看详情"):
-                    st.code(err)
-        else:
+        if st.session_state.db_ok:
             st.success("✅ 数据库已连接")
+        else:
+            st.error("⚠ 未连接")
+            if st.session_state.get("db_err"):
+                with st.expander("查看详情"):
+                    st.code(st.session_state.db_err)

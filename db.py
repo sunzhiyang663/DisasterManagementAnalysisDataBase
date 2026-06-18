@@ -50,7 +50,10 @@ def _raw_connect() -> pymssql.Connection | None:
     params = _get_db_params()
     if not params:
         return None
-    return pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
+    try:
+        return pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
+    except Exception:
+        return None
 
 
 _last_error: str = ""
