@@ -35,8 +35,7 @@ def get_connection() -> pymssql.Connection | None:
         return None
     try:
         return pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
-    except Exception as e:
-        st.error(f"数据库连接失败: {e}")
+    except Exception:
         return None
 
 
@@ -128,7 +127,7 @@ def get_tables() -> list[str]:
       AND TABLE_SCHEMA = 'dbo'
     ORDER BY TABLE_NAME
     """
-    df = execute_query(sql)
+    df = execute_query_nocache(sql)
     return df["TABLE_NAME"].tolist() if not df.empty else []
 
 
@@ -153,7 +152,7 @@ def get_table_schema(table_name: str) -> pd.DataFrame:
       AND c.TABLE_SCHEMA = 'dbo'
     ORDER BY c.ORDINAL_POSITION
     """
-    return execute_query(sql, (table_name,))
+    return execute_query_nocache(sql, (table_name,))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -165,7 +164,7 @@ def get_views() -> list[str]:
     WHERE TABLE_SCHEMA = 'dbo'
     ORDER BY TABLE_NAME
     """
-    df = execute_query(sql)
+    df = execute_query_nocache(sql)
     return df["TABLE_NAME"].tolist() if not df.empty else []
 
 
@@ -179,7 +178,7 @@ def get_procedures() -> list[str]:
       AND ROUTINE_SCHEMA = 'dbo'
     ORDER BY ROUTINE_NAME
     """
-    df = execute_query(sql)
+    df = execute_query_nocache(sql)
     return df["ROUTINE_NAME"].tolist() if not df.empty else []
 
 
