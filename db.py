@@ -28,15 +28,13 @@ def _get_db_params() -> dict | None:
     return None
 
 
-@st.cache_resource
 def get_connection() -> pymssql.Connection | None:
-    """获取数据库连接（缓存复用）"""
+    """每次调用创建新的数据库连接（避免多线程共享同一连接）"""
     params = _get_db_params()
     if not params:
         return None
     try:
-        conn = pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
-        return conn
+        return pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
     except Exception as e:
         st.error(f"数据库连接失败: {e}")
         return None
