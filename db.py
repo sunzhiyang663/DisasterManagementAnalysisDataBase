@@ -35,7 +35,7 @@ def get_connection() -> pymssql.Connection | None:
     if not params:
         return None
     try:
-        conn = pymssql.connect(**params, autocommit=True)
+        conn = pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
         return conn
     except Exception as e:
         st.error(f"数据库连接失败: {e}")
