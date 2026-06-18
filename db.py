@@ -1,58 +1,41 @@
-"""数据库连接层 - Azure SQL Database"""
+"""数据库连接层 - Azure SQL Database (pymssql)"""
 
 import pandas as pd
-import pyodbc
+import pymssql
 import streamlit as st
 import re
+import os
 
 
-def get_conn_string() -> str:
-    """从 Streamlit secrets 或环境变量读取连接字符串，优先使用 secrets.toml"""
-    # 优先读取 .streamlit/secrets.toml
+def _get_db_params() -> dict | None:
+    """读取数据库连接参数"""
     try:
-        server = st.secrets["azure_sql"]["server"]
-        database = st.secrets["azure_sql"]["database"]
-        username = st.secrets["azure_sql"]["username"]
-        password = st.secrets["azure_sql"]["password"]
-        return (
-            f"Driver={{ODBC Driver 18 for SQL Server}};"
-            f"Server=tcp:{server},1433;"
-            f"Database={database};"
-            f"Uid={username};Pwd={password};"
-            f"Encrypt=yes;TrustServerCertificate=no;"
-            f"Connection Timeout=30;"
-            f"AutoTranslate=yes;"
-        )
+        return {
+            "server": st.secrets["azure_sql"]["server"],
+            "database": st.secrets["azure_sql"]["database"],
+            "user": st.secrets["azure_sql"]["username"],
+            "password": st.secrets["azure_sql"]["password"],
+        }
     except KeyError:
         pass
 
-    # 回退到环境变量
-    import os
     server = os.getenv("AZURE_SQL_SERVER")
     database = os.getenv("AZURE_SQL_DATABASE", "disaster_db")
     username = os.getenv("AZURE_SQL_USERNAME")
     password = os.getenv("AZURE_SQL_PASSWORD")
     if all([server, username, password]):
-        return (
-            f"Driver={{ODBC Driver 18 for SQL Server}};"
-            f"Server=tcp:{server},1433;"
-            f"Database={database};"
-            f"Uid={username};Pwd={password};"
-            f"Encrypt=yes;TrustServerCertificate=no;"
-            f"Connection Timeout=30;"
-            f"AutoTranslate=yes;"
-        )
-    return ""
+        return {"server": server, "database": database, "user": username, "password": password}
+    return None
 
 
 @st.cache_resource
-def get_connection() -> pyodbc.Connection | None:
+def get_connection() -> pymssql.Connection | None:
     """获取数据库连接（缓存复用）"""
-    conn_str = get_conn_string()
-    if not conn_str:
+    params = _get_db_params()
+    if not params:
         return None
     try:
-        conn = pyodbc.connect(conn_str)
+        conn = pymssql.connect(**params, autocommit=True)
         return conn
     except Exception as e:
         st.error(f"数据库连接失败: {e}")
@@ -90,14 +73,13 @@ def execute_proc(proc_name: str, params: dict | None = None) -> pd.DataFrame:
     try:
         cursor = conn.cursor()
         if params:
-            placeholders = ", ".join(["?" for _ in params])
+            placeholders = ", ".join(["%s" for _ in params])
             sql = f"EXEC {proc_name} {placeholders}"
-            cursor.execute(sql, list(params.values()))
+            cursor.execute(sql, tuple(params.values()))
         else:
             cursor.execute(f"EXEC {proc_name}")
         columns = [col[0] for col in cursor.description] if cursor.description else []
         rows = cursor.fetchall()
-        cursor.commit()
         return pd.DataFrame.from_records(rows, columns=columns)
     except Exception as e:
         raise RuntimeError(f"存储过程执行失败: {e}")
@@ -111,7 +93,6 @@ def execute_non_query(sql: str, params: tuple | None = None) -> bool:
     try:
         cursor = conn.cursor()
         cursor.execute(sql, params)
-        cursor.commit()
         st.cache_data.clear()
         return True
     except Exception as e:
@@ -127,12 +108,11 @@ def execute_proc_non_query(proc_name: str, params: dict | None = None) -> bool:
     try:
         cursor = conn.cursor()
         if params:
-            placeholders = ", ".join(["?" for _ in params])
+            placeholders = ", ".join(["%s" for _ in params])
             sql = f"EXEC {proc_name} {placeholders}"
-            cursor.execute(sql, list(params.values()))
+            cursor.execute(sql, tuple(params.values()))
         else:
             cursor.execute(f"EXEC {proc_name}")
-        cursor.commit()
         st.cache_data.clear()
         return True
     except Exception as e:
@@ -171,7 +151,7 @@ def get_table_schema(table_name: str) -> pd.DataFrame:
             ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
         WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
     ) pk ON c.TABLE_NAME = pk.TABLE_NAME AND c.COLUMN_NAME = pk.COLUMN_NAME
-    WHERE c.TABLE_NAME = ?
+    WHERE c.TABLE_NAME = %s
       AND c.TABLE_SCHEMA = 'dbo'
     ORDER BY c.ORDINAL_POSITION
     """
@@ -208,7 +188,6 @@ def get_procedures() -> list[str]:
 def is_safe_sql(sql: str) -> bool:
     """检查 SQL 是否只读安全（仅允许 SELECT 和 EXEC）"""
     stripped = sql.strip().upper()
-    # 移除注释和多余空白
     stripped = re.sub(r'--.*$', '', stripped, flags=re.MULTILINE)
     stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)
     stripped = stripped.strip()
@@ -216,7 +195,6 @@ def is_safe_sql(sql: str) -> bool:
     if not stripped:
         return False
 
-    # 只允许 SELECT 或 EXEC[UTE] 开头
     if stripped.startswith("SELECT") or stripped.startswith("EXEC"):
         return True
     return False
