@@ -42,9 +42,13 @@ def render():
 
         st.divider()
 
-        from db import get_connection
+        from db import get_connection_with_error
 
-        if get_connection() is None:
-            st.error("⚠ 未连接")
+        conn, err = get_connection_with_error()
+        if conn is None:
+            st.error(f"⚠ 未连接")
+            if err:
+                with st.expander("查看详情"):
+                    st.code(err)
         else:
             st.success("✅ 数据库已连接")
