@@ -28,34 +28,42 @@ def _get_db_params() -> dict | None:
     return None
 
 
-def get_connection() -> pymssql.Connection | None:
-    """每次调用创建新的数据库连接（避免多线程共享同一连接）"""
+def _raw_connect() -> pymssql.Connection | None:
+    """底层连接工厂，不缓存"""
     params = _get_db_params()
     if not params:
         return None
-    try:
-        return pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
-    except Exception:
-        return None
+    return pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
+
+
+@st.cache_resource(ttl=10)
+def _cached_connect() -> pymssql.Connection | None:
+    """缓存连接 10 秒，同一页面内复用，避免多次建连"""
+    return _raw_connect()
 
 
 _last_error: str = ""
 
-def get_last_error() -> str:
-    return _last_error
+def get_connection() -> pymssql.Connection | None:
+    """获取数据库连接（10 秒内复用）"""
+    return _cached_connect()
 
 
 def get_connection_with_error() -> tuple[pymssql.Connection | None, str]:
-    """返回 (连接, 错误信息)，错误信息为空字符串表示成功"""
+    """返回 (连接, 错误信息)，用于侧边栏状态检测"""
     global _last_error
     params = _get_db_params()
     if not params:
         _last_error = "未配置数据库连接信息，请在 Streamlit Cloud Secrets 中设置 [azure_sql]"
         return None, _last_error
     try:
-        conn = pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
-        _last_error = ""
-        return conn, ""
+        conn = _cached_connect()
+        if conn is None:
+            # 缓存返回了 None，可能是之前失败被缓存了，重试一次
+            _last_error = "连接失败（可能是 Azure 免费层休眠，请稍等片刻后刷新）"
+        else:
+            _last_error = ""
+        return conn, _last_error
     except Exception as e:
         _last_error = str(e)
         return None, _last_error
