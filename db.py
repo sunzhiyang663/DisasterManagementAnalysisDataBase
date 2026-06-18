@@ -64,16 +64,7 @@ def get_connection() -> pymssql.Connection | None:
     sid = _get_session_id()
     with _sessions_lock:
         if sid in _sessions:
-            conn = _sessions[sid]
-            try:
-                conn.cursor().execute("SELECT 1")
-                return conn
-            except Exception:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-                del _sessions[sid]
+            return _sessions[sid]
         conn = _raw_connect()
         if conn:
             _sessions[sid] = conn
