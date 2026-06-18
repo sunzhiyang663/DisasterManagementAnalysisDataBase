@@ -5,6 +5,7 @@ import pymssql
 import streamlit as st
 import re
 import os
+import threading
 
 
 def _get_db_params() -> dict | None:
@@ -28,25 +29,26 @@ def _get_db_params() -> dict | None:
     return None
 
 
+_store = threading.local()  # 每个线程持有自己的连接
+
+
 def _raw_connect() -> pymssql.Connection | None:
-    """底层连接工厂，不缓存"""
+    """底层连接创建，每次调用建立新连接"""
     params = _get_db_params()
     if not params:
         return None
     return pymssql.connect(**params, autocommit=True, login_timeout=10, timeout=10)
 
 
-@st.cache_resource(ttl=10)
-def _cached_connect() -> pymssql.Connection | None:
-    """缓存连接 10 秒，同一页面内复用，避免多次建连"""
-    return _raw_connect()
-
-
 _last_error: str = ""
 
+
 def get_connection() -> pymssql.Connection | None:
-    """获取数据库连接（10 秒内复用）"""
-    return _cached_connect()
+    """获取当前线程的数据库连接，同一线程内复用"""
+    if hasattr(_store, 'conn') and _store.conn is not None:
+        return _store.conn
+    _store.conn = _raw_connect()
+    return _store.conn
 
 
 def get_connection_with_error() -> tuple[pymssql.Connection | None, str]:
@@ -57,10 +59,9 @@ def get_connection_with_error() -> tuple[pymssql.Connection | None, str]:
         _last_error = "未配置数据库连接信息，请在 Streamlit Cloud Secrets 中设置 [azure_sql]"
         return None, _last_error
     try:
-        conn = _cached_connect()
+        conn = get_connection()
         if conn is None:
-            # 缓存返回了 None，可能是之前失败被缓存了，重试一次
-            _last_error = "连接失败（可能是 Azure 免费层休眠，请稍等片刻后刷新）"
+            _last_error = "连接失败（Azure 可能休眠中，请稍后刷新）"
         else:
             _last_error = ""
         return conn, _last_error
